@@ -9,7 +9,6 @@
 #include <getopt.h>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <netinet/ip.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 
@@ -41,40 +40,34 @@ struct ThreadServerArgs{
 int result = 1;
 pthread_mutex_t mut = PTHREAD_MUTEX_INITIALIZER;
 void ThreadServer(void *args) {
-    struct ThreadServerArgs *thread_args = (struct ThreadServerArgs *)args;
+    struct ThreadServerArgs *ts_args = (struct ThreadServerArgs *)args;
 
-    //Информация и проверка хоста (имя, ip и т.д.)
-    struct hostent *hostname = gethostbyname((*thread_args).to_server.ip);
+    struct hostent *hostname = gethostbyname((*ts_args).to_server.ip);
     if (hostname == NULL) {
-        fprintf(stderr, "gethostbyname failed with %s\n", (*thread_args).to_server.ip);
+        fprintf(stderr, "gethostbyname failed with %s\n", (*ts_args).to_server.ip);
         exit(1);
     }
 
-    //Описываем сокет
     struct sockaddr_in server;
     server.sin_family = AF_INET;
-    server.sin_port = htons((*thread_args).to_server.port);
+    server.sin_port = htons((*ts_args).to_server.port);
     server.sin_addr.s_addr = *((unsigned long *)hostname->h_addr);
 
-    //Создаём ссылку на созданный коммуникационный узел
     int sck = socket(AF_INET, SOCK_STREAM, 0);
     if (sck < 0) {
         fprintf(stderr, "Socket creation failed!\n");
         exit(1);
     }
 
-    //Установления логического соединения со стороны клиента + неявный bind()
     if (connect(sck, (struct sockaddr *)&server, sizeof(server)) < 0) {
         fprintf(stderr, "Connection failed\n");
-        //fprintf(stderr, "error creating connection: %s ", strerror(errno));
         exit(1);
     }
-    printf("%s:%d connect\n", (*thread_args).to_server.ip, (*thread_args).to_server.port);
+    printf("%s:%d connect\n", (*ts_args).to_server.ip, (*ts_args).to_server.port);
     
-    //Посылаем на сервер
-    uint64_t begin = (*thread_args).begin;
-    uint64_t end = (*thread_args).end;
-    uint64_t mod = (*thread_args).mod;
+    uint64_t begin = (*ts_args).begin;
+    uint64_t end = (*ts_args).end;
+    uint64_t mod = (*ts_args).mod;
 
     char task[sizeof(uint64_t) * 3];
     memcpy(task, &begin, sizeof(uint64_t));
@@ -85,9 +78,9 @@ void ThreadServer(void *args) {
       fprintf(stderr, "Send failed\n");
       exit(1);
     }
-    printf("%s:%d send: ( %lu, %lu ) mod = %lu\n", (*thread_args).to_server.ip, (*thread_args).to_server.port, begin, end, mod);
+    printf("%s:%d send: %lu %lu %lu\n",
+      (*ts_args).to_server.ip, (*ts_args).to_server.port, begin, end, mod);
 
-    //Принимаем ответ
     char response[sizeof(uint64_t)];
     if (recv(sck, response, sizeof(response), 0) < 0) {
       fprintf(stderr, "Recieve failed\n");
@@ -96,14 +89,12 @@ void ThreadServer(void *args) {
 
     uint64_t answer = 0;
     memcpy(&answer, response, sizeof(uint64_t));
-    printf("%s:%d answer: %lu\n", (*thread_args).to_server.ip, (*thread_args).to_server.port, answer);
+    printf("%s:%d answer: %lu\n",(*ts_args).to_server.ip, (*ts_args).to_server.port, answer);
     
-    //Блокируем
     pthread_mutex_lock(&mut);
     int temp = result;
     result = (temp * answer) % mod;
     pthread_mutex_unlock(&mut);
-    //Разблокируем
     
     close(sck);
 }
@@ -133,7 +124,7 @@ int main(int argc, char **argv) {
         f = ConvertStringToUI64(optarg, &k);
         // TODO: your code here
         if (!f) {
-            printf("incorrect value k\n");
+            printf("invalid value k\n");
             return -1;
         }
         break;
@@ -141,7 +132,7 @@ int main(int argc, char **argv) {
         f = ConvertStringToUI64(optarg, &mod);
         // TODO: your code here
         if (!f) {
-            printf("incorrect value mod\n");
+            printf("invalid value mod\n");
             return -1;
         }
         break;
@@ -181,7 +172,6 @@ int main(int argc, char **argv) {
   struct Server *to = malloc(sizeof(struct Server) * servers_num);
   fclose(addresses);
 
-  //Заполняем в структуру to - ip и port
   FILE* addresses2 = fopen(servers, "r");
   int i = 0;
   while (!feof(addresses2)) {
@@ -193,17 +183,14 @@ int main(int argc, char **argv) {
   fclose(addresses2);
 
   for (i = 0; i < servers_num; i++) {
-    printf("Client find %s:%d\n", (*(to+i)).ip, (*(to+i)).port);
+    printf("server: %s:%d\n", (*(to+i)).ip, (*(to+i)).port);
   }
-
   sleep(1);
 
-  //Создаём N потоков
   pthread_t threads[servers_num];
-  //Создаём N аргументов под них
-  struct ThreadServerArgs args[servers_num];
-
+  
   // Разделяем данные между потоками
+  struct ThreadServerArgs args[servers_num];
   uint64_t begin = 1, end = k;
   for(int i = 0; i < servers_num; i++) {
    args[i].to_server = *(to+i);
