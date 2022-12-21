@@ -176,6 +176,10 @@ int main(int argc, char **argv) {
       memcpy(&end, from_client + sizeof(uint64_t), sizeof(uint64_t));
       memcpy(&mod, from_client + 2 * sizeof(uint64_t), sizeof(uint64_t));
 
+      // Запущенный сервер соединяется не понятно с чем и принимат какие-то данные  
+      // (клиент в тот момент не запущен)
+      // Эти данный, воспринятые как uint64_t, перегружают доступные ресурсы сайта
+      // и программа зависает.
       uint64_t max_value = 1000000;
       if(begin > max_value || end > max_value || mod > max_value)
       {
